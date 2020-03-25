@@ -8,6 +8,7 @@ typedef uint16_t u16;
 typedef uint32_t u32;
 typedef uint64_t u64;
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/socket.h>
@@ -150,9 +151,10 @@ static inline u64 rs(struct timespec begin, struct timespec end) {
     return result;
 }
 
-static int tcp_client(int argc, char* argv[]) {
+// @param: socket_type: either TCP (SOCK_STREAM) or UDP (SOCK_DGRAM)
+static int client(int argc, char **argv, i32 socketType) {
     if (argc > 3) {
-        fprintf(stderr, "usage: tcp_client hostname port\n");
+        fprintf(stderr, "usage: client hostname port\n");
         return -1;
     }
 
@@ -161,7 +163,7 @@ static int tcp_client(int argc, char* argv[]) {
     printf("Configuring remote address...\n");
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_socktype = socketType;
     struct addrinfo* peer_address;
     if (getaddrinfo(addres_name, service, &hints, &peer_address)) {
         fprintf(stderr, "getaddrinfo() failed. (%d)\n", errno);
@@ -272,24 +274,190 @@ static i32 tcp_server(void) {
             return -1;
         }
 
-       for (i32 socket; socket <= max_socket; ++socket) {
+       for (i32 socket = 1; socket <= max_socket; ++socket) {
            if (FD_ISSET(socket, &reads)) {
                if (socket == socket_listen) {
                    struct sockaddr_storage client_address;
+                   socklen_t client_len = sizeof(client_address);
+                   i32 socket_client = accept(socket_listen, (struct sockaddr*) &client_address, &client_len);
+                   if (!is_valid_socket(socket_client)) {
+                       fprintf(stderr, "accept() failed. (%d)\n", errno);
+                       return -1;
+                   }
+
+                   FD_SET(socket_client, &master);
+                   if (socket_client > max_socket) {
+                       max_socket = socket_client;
+                   }
+
+                   char address_buffer[100];
+                   getnameinfo((struct sockaddr*)&client_address, client_len, address_buffer, sizeof(address_buffer), 0, 0, NI_NUMERICHOST);
+                   printf("New connection from %s\n", address_buffer);
+               } else {
+                   char read[1024];
+                   i32 bytes_received = recv(socket, read, 1024, 0);
+                   if (bytes_received < 1) {
+                       FD_CLR(socket, &master);
+                       close(socket);
+                       continue;
+                   }
+
+                   for (i32 byte = 0; byte < bytes_received; ++byte) {
+                       read[byte] = toupper(read[byte]);
+                   }
+                   send(socket, read, bytes_received, 0);
                }
            }
        }
     }
-};
+
+    printf("Closing listening socket...\n");
+    close(socket_listen);
+
+    printf("Finished!");
+    return 0;
+}
+
+static int udp_server() {
+    printf("Configuring local address...\n");
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    struct addrinfo* bind_address;
+    getaddrinfo(0, "8080", &hints, &bind_address);
+
+    printf("Creating socket...\n");
+    i32 socket_listen = socket(bind_address->ai_family, bind_address->ai_socktype, bind_address->ai_protocol);
+    if (!is_valid_socket(socket_listen)) {
+        fprintf(stderr, "socket() failed. (%d)\n", errno);
+        return -1;
+    }
+
+    printf("Binding socket to local address...\n");
+    if (bind(socket_listen, bind_address->ai_addr, bind_address->ai_addrlen)) {
+        fprintf(stderr, "bind() failed. (%d)\n", errno);
+        return -1;
+    }
+    freeaddrinfo(bind_address);
+
+    struct sockaddr_storage client_address;
+    socklen_t client_len = sizeof(client_address);
+    char read[1024];
+    i32 bytes_received = recvfrom(socket_listen, read, 1024, 0, (struct sockaddr*)&client_address, &client_len);
+    printf("Received (%d bytes): %.*s\n", bytes_received, bytes_received, read);
+
+    printf("Remote address is: ");
+    char address_buffer[100];
+    char service_buffer[100];
+    getnameinfo((struct sockaddr*)&client_address, client_len, address_buffer, sizeof(address_buffer), service_buffer, sizeof(service_buffer), NI_NUMERICHOST | NI_NUMERICSERV);
+    printf("%s %s\n", address_buffer, service_buffer);
+
+    close(socket_listen);
+    printf("Finished\n");
+
+    return 1;
+}
+
+static int udp_client() {
+    printf("Configuring remote address...\n");
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_DGRAM;
+    struct addrinfo* peer_address;
+    if (getaddrinfo("127.0.0.1", "8080", &hints, &peer_address)) {
+        fprintf(stderr, "getaddrinfo() failed. (%d)\n", errno);
+        return -1;
+    }
+
+    printf("Remote address is: ");
+    char address_buffer[100];
+    char service_buffer[100];
+
+    getnameinfo(peer_address->ai_addr, peer_address->ai_addrlen, address_buffer, sizeof(address_buffer), service_buffer, sizeof(service_buffer), NI_NUMERICHOST | NI_NUMERICSERV);
+    printf("%s %s\n", address_buffer, service_buffer);
+
+    printf("Creating socket...\n");
+    i32 socket_peer = socket(peer_address->ai_family, peer_address->ai_socktype, peer_address->ai_protocol);
+    if (!is_valid_socket(socket_peer)) {
+        fprintf(stderr, "socket() failed. (%d)\n", errno);
+        return -1;
+    }
+
+    const char* message = "Hello world";
+    printf("Sending: %s\n", message);
+    i32 bytes_sent = sendto(socket_peer, message, strlen(message), 0, peer_address->ai_addr, peer_address->ai_addrlen);
+    printf("Sent %d bytes.\n", bytes_sent);
+
+    freeaddrinfo(peer_address);
+    close(socket_peer);
+    printf("Finished!\n");
+}
+
+int multiplex_udp_server() {
+    printf("Configuring local address...\n");
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    struct addrinfo* bind_address;
+    getaddrinfo("127.0.0.1", "8080", &hints, &bind_address);
+
+    printf("Creating socket...\n");
+    i32 socket_listen = socket(bind_address->ai_family, bind_address->ai_socktype, bind_address->ai_protocol);
+    if (!is_valid_socket(socket_listen)) {
+        fprintf(stderr, "socket() failed. (%d)\n", errno);
+        return -1;
+    }
+
+    printf("Binding socket to local address...\n");
+    if (bind(socket_listen, bind_address->ai_addr, bind_address->ai_addrlen)) {
+        fprintf(stderr, "bind() failed. (%d)\n", errno);
+        return -1;
+    }
+    freeaddrinfo(bind_address);
+
+    fd_set master;
+    FD_ZERO(&master);
+    FD_SET(socket_listen, &master);
+    i32 max_socket = socket_listen;
+
+    printf("Waiting for connections...\n");
+
+    while (true) {
+        fd_set reads = master;
+        if (select(max_socket + 1, &reads, 0, 0, 0) < 0) {
+            fprintf(stderr, "select() failed. (%d)\n", errno);
+            return -1;
+        }
+
+        if (FD_ISSET(socket_listen, &reads)) {
+            struct sockaddr_storage client_address;
+            socklen_t client_len = sizeof(client_address);
+
+            char read[1024];
+            i32 bytes_received = recvfrom(socket_listen, read, 1024, 0, (struct sockaddr*)&client_address, &client_len);
+            if (bytes_received < 1) {
+                fprintf(stderr, "Connection closed. (%d)\n", errno);
+            }
+
+            for (i32 byte = 0; byte < bytes_received; ++byte) {
+                read[byte] = toupper(read[byte]);
+            }
+            sendto(socket_listen, read, bytes_received, 0, (struct sockaddr*)&client_address, client_len);
+        }
+    }
+
+    printf("Closing listening socket...\n");
+    close(socket_listen);
+
+    printf("Finished\n");
+    return 0;
+}
 int main(int argc, char* argv[]) {
-//    tcp_client(argc, argv);
-//    res();
-//    struct timespec begin = perfC();
-//    showAddresses();
-//    struct timespec middle = perfC();
-//    first();
-//    struct timespec end = perfC();
-//
-//    printf("First: %lu\n", rs(begin, middle));
-//    printf("Second: %lu\n", rs(middle, end));
+    multiplex_udp_server();
 }
