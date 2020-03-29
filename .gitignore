@@ -51,8 +51,14 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# Vim
+*.swp
+
 # CMake
 *.cmake
 CMakeFiles/
 CMakeCache.txt
 Makefile
+compile_commands.json
+network
+.clangd/

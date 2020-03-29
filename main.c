@@ -52,7 +52,7 @@ typedef enum {
 } ProgramError;
 
 #define LOGS 1
-void log(ProgramError program_error, const char* message_format, ...) {
+void logger(ProgramError program_error, const char* message_format, ...) {
 #if LOGS
     const char* predefined_format = "[%s";
     FILE* stream = program_error == INFO ? stdout : stderr;
@@ -88,7 +88,7 @@ void print_time(const char* benchmark_name, u64 time_in_ns) {
         time_unit = ns;
         time = time_in_ns;
     }
-    log(INFO, "[%s benchmark] Time: %lu %s.\n", benchmark_name, time, time_unit);
+    logger(INFO, "[%s benchmark] Time: %lu %s.\n", benchmark_name, time, time_unit);
 }
 
 #define benchmark_code(__name, __code) { struct timespec __begin = perfC(); __code struct timespec __end = perfC(); u64 __timeInNS = rs(__begin, __end); print_time(__name, __timeInNS); }

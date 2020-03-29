@@ -22,7 +22,7 @@ URL parse_url(const char* raw_url) {
     }
 
     if (protocol && strcmp(protocol, "http")) {
-        log(CRITICAL, "Unknown protocol '%s'. Only 'http' is supported.\n", protocol);
+        logger(CRITICAL, "Unknown protocol '%s'. Only 'http' is supported.\n", protocol);
     }
 
     char* hostname = p;
@@ -102,7 +102,7 @@ i32 connect_to_host(char* hostname, char* port) {
     hints.ai_socktype = SOCK_STREAM;
     struct addrinfo* peer_address;
     if (getaddrinfo(hostname, port, &hints, &peer_address)) {
-        log(CRITICAL, "getaddrinfo() failed. (%d)\n", errno);
+        logger(CRITICAL, "getaddrinfo() failed. (%d)\n", errno);
     }
 
     printf("Remote address is: ");
@@ -115,24 +115,24 @@ i32 connect_to_host(char* hostname, char* port) {
     printf("Creating socket...\n");
     i32 server = socket(peer_address->ai_family, peer_address->ai_socktype, peer_address->ai_protocol);
     if (!is_valid_socket(server)) {
-        log(CRITICAL, "socket() failed. (%d)\n", errno);
+        logger(CRITICAL, "socket() failed. (%d)\n", errno);
     }
 
     printf("Connecting...\n");
     if (connect(server, peer_address->ai_addr, peer_address->ai_addrlen)) {
-        log(CRITICAL, "connect() failed. (%d)\n", errno);
+        logger(CRITICAL, "connect() failed. (%d)\n", errno);
         exit(-1);
     }
     freeaddrinfo(peer_address);
 
-    log(INFO, "Connected...\n");
+    logger(INFO, "Connected...\n");
 
     return server;
 }
 
 void http_client(int argc, char** argv) {
     if (argc < 2) {
-        log(CRITICAL, "usage: http_client url\n");
+        logger(CRITICAL, "usage: http_client url\n");
     }
 
     const char* raw_url = argv[1];
@@ -153,11 +153,11 @@ void http_client(int argc, char** argv) {
 
     while (true) {
         if ((clock() - start_time) / CLOCKS_PER_SEC > TIMEOUT) {
-            log(CRITICAL, "Timeout after %.02f seconds\n", TIMEOUT);
+            logger(CRITICAL, "Timeout after %.02f seconds\n", TIMEOUT);
         }
 
         if (p == end) {
-            log(CRITICAL, "Out of buffer space\n");
+            logger(CRITICAL, "Out of buffer space\n");
         }
 
         fd_set reads;
@@ -169,16 +169,16 @@ void http_client(int argc, char** argv) {
         timeout.tv_usec = 200000;
 
         if (select(server + 1, &reads, 0, 0, &timeout) < 0) {
-            log(CRITICAL, "select() failed. (%d)\n", errno);
+            logger(CRITICAL, "select() failed. (%d)\n", errno);
         }
 
         if (FD_ISSET(server, &reads)) {
             i32 bytes_received = recv(server, p, end - p, 0);
             if (bytes_received < 1) {
                 if (encoding == connection && body) {
-                    log(INFO, "%.*s", (i32) (end - body), body);
+                    logger(INFO, "%.*s", (i32) (end - body), body);
                 }
-                log(INFO, "\nConnection closed by peer.\n");
+                logger(INFO, "\nConnection closed by peer.\n");
                 break;
             }
 
@@ -191,7 +191,7 @@ void http_client(int argc, char** argv) {
             body += 4;
         }
 
-        log(INFO, "Received headers:\n%s\n", response);
+        logger(INFO, "Received headers:\n%s\n", response);
 
         q = strstr(response, "\nContent-Length: ");
         if (q) {
@@ -208,12 +208,12 @@ void http_client(int argc, char** argv) {
                 encoding = connection;
             }
         }
-        log(INFO, "\nReceived body:\n");
+        logger(INFO, "\nReceived body:\n");
 
         if (body) {
             if (encoding == length) {
                 if (p - body >= remaining) {
-                    log(INFO, "%.*s", remaining, body);
+                    logger(INFO, "%.*s", remaining, body);
                     break;
                 }
             } else if (encoding == chunked) {
@@ -226,7 +226,7 @@ void http_client(int argc, char** argv) {
                         } else break;
                     }
                     if (remaining && p - body >= remaining) {
-                        log(INFO, "%.*s", remaining, body);
+                        logger(INFO, "%.*s", remaining, body);
                         body += remaining + 2;
                         remaining = 0;
                     }
@@ -236,7 +236,7 @@ void http_client(int argc, char** argv) {
     }
 
     finish:
-    log(INFO, "\nClosing socket...\n");
+    logger(INFO, "\nClosing socket...\n");
     close(server);
-    log(INFO, "Finished\n");
+    logger(INFO, "Finished\n");
 }

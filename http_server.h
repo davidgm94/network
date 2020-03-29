@@ -22,7 +22,7 @@ static const char *get_content_type(const char* path) {
 }
 
 static i32 create_server_socket(const char* host, const char* port) {
-    log(INFO, "Configuring local address...\n");
+    logger(INFO, "Configuring local address...\n");
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -32,21 +32,21 @@ static i32 create_server_socket(const char* host, const char* port) {
     struct addrinfo* bind_address;
     getaddrinfo(host, port, &hints, &bind_address);
 
-    log(INFO, "Creating socket...\n");
+    logger(INFO, "Creating socket...\n");
     i32 socket_listen = socket(bind_address->ai_family, bind_address->ai_socktype, bind_address->ai_protocol);
     if (!is_valid_socket(socket_listen)) {
-        log(CRITICAL, "socket() failed. (%d)\n", errno);
+        logger(CRITICAL, "socket() failed. (%d)\n", errno);
     }
 
-    log(INFO, "Binding socket to local address...\n");
+    logger(INFO, "Binding socket to local address...\n");
     if (bind(socket_listen, bind_address->ai_addr, bind_address->ai_addrlen)) {
-        log(CRITICAL, "bind() failed. (%d)\n", errno);
+        logger(CRITICAL, "bind() failed. (%d)\n", errno);
     }
     freeaddrinfo(bind_address);
 
-    log(INFO, "Listening...\n");
+    logger(INFO, "Listening...\n");
     if (listen(socket_listen, 10) < 0) {
-        log(CRITICAL, "listen() failed. (%d)\n", errno);
+        logger(CRITICAL, "listen() failed. (%d)\n", errno);
     }
 
     return socket_listen;
@@ -78,7 +78,7 @@ ClientInfo* get_client(i32 socket) {
     ClientInfo* n = (ClientInfo*) calloc(1, sizeof(ClientInfo));
 
     if (!n)
-        log(CRITICAL, "Out of memory\n");
+        logger(CRITICAL, "Out of memory\n");
 
     n->address_len = sizeof(n->address);
     n->next = g_client_list.head;
