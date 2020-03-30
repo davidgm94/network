@@ -86,3 +86,121 @@ ClientInfo* get_client(i32 socket) {
     ++g_client_list.size;
     return n;
 }
+
+void drop_client(ClientInfo* client) {
+	close(client->socket);
+	
+	ClientInfo** p = &g_client_list.head;
+
+	while (*p) {
+		if (*p == client) {
+			*p = client->next;
+			free(client);
+			return;
+		}
+		p = &(*p)->next;
+	}
+
+	logger(CRITICAL, "drop_client() failed. Client not found\n");
+	exit(1);
+}
+
+const char* get_client_address(ClientInfo* client) {
+	static char address_buffer[100];
+	getnameinfo((struct sockaddr*)&client->address, client->address_len,
+			address_buffer, sizeof(address_buffer), 0, 0, NI_NUMERICHOST);
+	return address_buffer;
+}
+
+fd_set wait_on_clients(i32 server) {
+	fd_set reads;
+	FD_ZERO(&reads);
+	FD_SET(server, &reads);
+	i32 max_socket = server;
+
+	ClientInfo* client = g_client_list.head;
+
+	while (client) {
+		FD_SET(client->socket, &reads);
+		if (client->socket > max_socket)
+			max_socket = client->socket;
+		client = client->next;
+	}
+
+	if (select(max_socket + 1, &reads, 0, 0, 0) < 0)
+		logger(CRITICAL, "select() failed. (%d)\n", errno);
+
+	return reads;
+}
+
+void send_400(ClientInfo* client) {
+	char c400[] = "HTTP/1.1 400 Bad Request\r\n"
+		"Connection: close\r\n"
+		"Content-Length: 11\r\n\r\nBad request";
+	send(client->socket, c400, COUNTOF(c400), 0);
+	drop_client(client);
+}
+
+void send_404(ClientInfo* client) {
+	const char* c404 = "HTTP/1.1 404 Not Found\r\n"
+		"Connection: close\r\n"
+		"Content-Length: 9\r\n\r\nNot Found";
+	send(client->socket, c404, COUNTOF(c404), 0);
+	drop_client(client);
+}
+
+void serve_resource(ClientInfo* client, const char* path) {
+	printf("serve_resource %s %s\n", get_client_address(client), path);
+	if (strcmp(path, "/") == 0)
+		path = "/index.html";
+	if (strlen(path) > 100) {
+		send_400(client);
+		return;
+	}
+
+	if (strstr(path, "..")) {
+		send_404(client);
+		return;
+	}
+
+	char full_path[128];
+	sprintf(full_path, "public%s", path);
+
+	FILE* file = fopen(full_path, "rb");
+	if (!file) {
+		send_404(client);
+		return;
+	}
+
+	fseek(file, 0L, SEEK_END);
+	size_t cl = ftell(file);
+	rewind(file);
+
+	const char* ct = get_content_type(full_path);
+#define BUFFER_SIZE 1024
+	char buffer[BUFFER_SIZE];
+
+	sprintf(buffer, "HTTP/1.1 200 OK\r\n");
+	send(client->socket, buffer, strlen(buffer), 0);
+
+	sprintf(buffer, "Connection: close\r\n");
+	send(client->socket, buffer, strlen(buffer), 0);
+
+	sprintf(buffer, "Content-Length: %u\r\n", cl);
+	send(client->socket, buffer, strlen(buffer), 0);
+
+	sprintf(buffer, "Content-Type: %s\r\n", ct);
+	send(client->socket, buffer, strlen(buffer), 0);
+
+	sprintf(buffer, "\r\n");
+	send(client->socket, buffer, strlen(buffer), 0);
+
+	int r = fread(buffer, 1, BUFFER_SIZE, file);
+	while (r) {
+		send(client->socket, buffer, r, 0);
+		r = fread(buffer, 1, BUFFER_SIZE, file);
+	}
+
+	fclose(file);
+	drop_client(client);
+}

@@ -24,6 +24,7 @@ typedef uint64_t u64;
 #include <stdarg.h>
 
 #define is_valid_socket(s) (s >= 0)
+#define COUNTOF(__arr) ((size_t)((sizeof(__arr))/(sizeof(__arr[0]))))
 
 static inline struct timespec perfC(void) {
     struct timespec ts;
@@ -96,7 +97,61 @@ void print_time(const char* benchmark_name, u64 time_in_ns) {
 #include "http_client.h"
 #include "http_server.h"
 int main(int argc, char* argv[]) {
-    benchmark_code("HTTP_CLIENT",
-                   http_client(argc, argv);
-            )
+	i32 server = create_server_socket("127.0.0.1", "8080");
+	while (true) {
+		fd_set reads = wait_on_clients(server);
+		if (FD_ISSET(server, &reads)) {
+			ClientInfo* client = get_client(-1);
+			client->socket = accept(server, (struct sockaddr*) &(client->address),
+					&(client->address_len));
+			if (!is_valid_socket(client->socket)) {
+				logger(CRITICAL, "accept() failed. (%d)\n", errno);
+			}
+			
+			logger(INFO, "New connection from %s.\n", get_client_address(client));
+		}
+
+		ClientInfo* client = g_client_list.head;
+		while (client) {
+			ClientInfo* next = client->next;
+			if (FD_ISSET(client->socket, &reads)) {
+				if (MAX_REQUEST_SIZE == client->received) {
+					send_400(client);
+					continue;
+				}
+
+				int r = recv(client->socket, client->request + client->received, MAX_REQUEST_SIZE - client->received, 0);
+
+				if (r < 1) {
+					logger(ERROR, "Unexpected disconnect from %s.\n", get_client_address(client));
+					drop_client(client);
+				} else {
+					client->received += r;
+					client->request[client->received] = 0;
+
+					char* q = strstr(client->request, "\r\n\r\n");
+					if (q) {
+						if (strncmp("GET /", client->request, 5)) {
+							send_400(client);
+						} else {
+							char* path = client->request + 4;
+							char* end_path = strstr(path, " ");
+							if (!end_path) {
+								send_400(client);
+							} else {
+								*end_path = 0;
+								serve_resource(client, path);
+							}
+						}
+					}
+				}
+			}
+
+			client = next;
+		}
+	}
+
+	logger(INFO, "Closing socket...\n");
+	close(server);
+	logger(INFO, "Finished\n");
 }
