@@ -137,6 +137,9 @@ void http_client(int argc, char** argv) {
 
     const char* raw_url = argv[1];
     URL url = parse_url(raw_url);
+	if (argc == 3) {
+		strcpy(url.port, argv[2]);
+	}
     i32 server = connect_to_host(url.hostname, url.port);
     send_request(server, &url, GET, NULL, NULL, NULL);
 
