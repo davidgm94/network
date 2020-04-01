@@ -186,7 +186,7 @@ void serve_resource(ClientInfo* client, const char* path) {
 	sprintf(buffer, "Connection: close\r\n");
 	send(client->socket, buffer, strlen(buffer), 0);
 
-	sprintf(buffer, "Content-Length: %u\r\n", cl);
+	sprintf(buffer, "Content-Length: %zu\r\n", cl);
 	send(client->socket, buffer, strlen(buffer), 0);
 
 	sprintf(buffer, "Content-Type: %s\r\n", ct);

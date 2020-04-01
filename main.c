@@ -98,7 +98,7 @@ void print_time(const char* benchmark_name, u64 time_in_ns) {
 #include "http_server.h"
 #include "email.h"
 int main(int argc, char* argv[]) {
-	benchmark_code("CLIENT BENCHMARK",
-		http_client(argc, argv);
+	benchmark_code("SMTP BENCHMARK",
+			email();
 	)
 }
